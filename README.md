@@ -6,7 +6,7 @@ Esta aplicación web extrae, procesa y visualiza indicadores macroeconómicos y 
 
 ## Objetivo del Proyecto
 
-El propósito de este proyecto es demostrar la aplicación práctica de herramientas como **Streamlit**, **Pandas**, **NumPy**, **Matplotlib**, **Seaborn**, **SQLite** y el **consumo de APIs externas**, todo bajo un diseño modular y principios de arquitectura limpia.
+El propósito de este proyecto es demostrar la aplicación práctica de herramientas como **Streamlit**, **Pandas**, **NumPy**, **Matplotlib**, **Seaborn**, **SQLite** y el **consumo de APIs externas**, todo bajo un diseño modular y principios de arquitectura hexagonal.
 
 ### Conceptos Aplicados en el Código:
 
@@ -65,14 +65,98 @@ El pipeline de datos consulta actualmente 8 métricas estructurales:
 
 ```
 Insight Five0Five/
-├── app.py               # Aplicación Streamlit (frontend + visualización)
-├── populate_db.py       # Script ETL para crear la base de datos local
-├── schema.sql           # Esquema SQL (tablas, índices, vistas)
-├── worldbank.db         # Base de datos SQLite local (generada)
-├── requirements.txt     # Dependencias del proyecto
-├── correcciones/        # Documentación de revisión técnica
-└── changes/             # Registro de cambios realizados
+├── app.py                         # Composition Root (Streamlit)
+├── populate_db.py                 # Composition Root (ETL)
+├── schema.sql                     # Esquema SQL (tablas, índices, vistas)
+├── requirements.txt               # Dependencias del proyecto
+│
+├── domain/                        # CAPA DE DOMINIO (el hexágono)
+│   ├── entities.py                # Entidades puras (Indicator, IndicatorValue)
+│   ├── exceptions.py              # Excepciones del dominio
+│   ├── ports.py                   # Puertos (interfaces abstractas)
+│   └── use_cases.py               # Casos de uso (GetIndicators, PopulateDatabase)
+│
+├── application/                   # CAPA DE APLICACIÓN (servicios)
+│   ├── transformer.py             # Transformaciones (melt, interpolate, pivot)
+│   └── validator.py               # Validación de rangos
+│
+├── infrastructure/                # CAPA DE INFRAESTRUCTURA (adaptadores)
+│   ├── api/
+│   │   └── worldbank.py           # WorldBankSource (wbgapi)
+│   ├── persistence/
+│   │   └── sqlite.py              # SQLiteRepository (sqlite3)
+│   └── presentation/
+│       └── streamlit.py           # StreamlitUI
+│
+├── config/                        # CONFIGURACIÓN
+│   └── settings.py                # Constantes unificadas
+│
+├── tests/                         # Tests unitarios con fakes
+│   ├── fakes.py
+│   └── test_use_cases.py
+│
+├── cambios/                       # Registro de cambios
+│   └── cambios_realizados.txt
+│
+└── Hexagonal/                     # Documentación de arquitectura
+    └── documentacion.md
 ```
+
+### Diagrama de Arquitectura Hexagonal
+
+```
+                       app.py (Composition Root)
+                               |
+                     ┌─────────▼──────────┐
+                     │   StreamlitUI      │
+                     │ (Infrastructure)   │
+                     └─────────┬──────────┘
+                               │ llama a
+                     ┌─────────▼──────────┐
+                     │GetIndicatorsUseCase│
+                     │   (Caso de uso)    │
+                     │                    │
+                     │ ┌─ Intenta API ──┐ │
+                     │ │   ¿Falla?      │ │
+                     │ │   Sí──▼──┐     │ │
+                     │ │   Lee DB │     │ │
+                     │ └─────────┘     │ │
+                     │      ▼           │ │
+                     │ Transformar datos│ │
+                     └──┬──────────┬────┘ │
+                        │          │
+               ┌────────▼──┐  ┌───▼──────────┐
+               │WorldBank  │  │  SQLite      │
+               │Source     │  │ Repository   │
+               │(wbgapi)   │  │ (sqlite3)    │
+               └───────────┘  └──────────────┘
+               Infrastructure   Infrastructure
+               (API)            (Persistence)
+
+               FLUJO NORMAL ──►    FLUJO FALLBACK ──►
+```
+
+**Flujo normal:** `StreamlitUI → GetIndicatorsUseCase → WorldBankSource → datos transformados → UI`
+
+**Flujo fallback (sin internet):** `StreamlitUI → GetIndicatorsUseCase → WorldBankSource(FALLA) → SQLiteRepository → datos transformados → UI`
+
+### Capas de la Arquitectura
+
+1. **domain/ — Capa de Dominio:** El corazón de la aplicación. Contiene entidades puras (`entities.py`), puertos o interfaces abstractas (`ports.py`), casos de uso (`use_cases.py`) y excepciones de negocio (`exceptions.py`). No importa nada de infraestructura (ni sqlite3, ni requests, ni streamlit).
+
+2. **application/ — Capa de Aplicación:** Servicios que transforman y validan datos. `DataTransformer` realiza operaciones pandas (melt, interpolate, pivot). `DataValidator` verifica rangos válidos por indicador.
+
+3. **infrastructure/ — Capa de Infraestructura:** Adaptadores concretos que implementan los puertos del dominio. `WorldBankSource` traduce llamadas a la API del Banco Mundial, `SQLiteRepository` maneja la persistencia, y `StreamlitUI` renderiza el dashboard.
+
+4. **config/ — Configuración:** Constantes centralizadas como indicadores, rangos de validación y variables de entorno.
+
+### Principios de Diseño Aplicados
+
+1. **Dominio puro:** Las entidades (`domain/entities.py`) son dataclasses sin imports de infraestructura. Los casos de uso (`domain/use_cases.py`) orquestan la lógica sin conocer detalles técnicos.
+2. **Puertos e interfaces:** Los adaptadores implementan contratos abstractos (`domain/ports.py`), permitiendo intercambiar tecnologías sin modificar el núcleo.
+3. **Inversión de dependencias:** Los Composition Roots (`app.py`, `populate_db.py`) son el único lugar donde se crean instancias concretas y se inyectan dependencias.
+4. **Fallback automático:** El caso de uso `GetIndicatorsUseCase` intenta la API del Banco Mundial primero; si falla, lee desde SQLite local. El usuario nunca ve el cambio de origen.
+5. **Excepciones de dominio:** Errores como `ApiCaidaError` o `DatosNoEncontradosError` encapsulan problemas técnicos en términos del negocio.
 
 ## Posibles Mejoras a Futuro (Roadmap Estudiantil)
 
