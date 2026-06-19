@@ -1,3 +1,21 @@
+# =============================================================================
+# Insight Five0Five - Dependencias y configuración
+# =============================================================================
+# PASOS PARA EJECUTAR EL PROYECTO:
+#
+#   1. Instalar dependencias:
+#      pip install -r requirements.txt
+#
+#   2. Crear la base de datos local (requiere internet):
+#      python populate_db.py
+#
+#   3. Ejecutar la aplicación:
+#      streamlit run app.py
+#
+#      - Con internet: usa la API del Banco Mundial en vivo.
+#      - Sin internet: usa los datos guardados en SQLite (requiere paso 2).
+# =============================================================================
+
 streamlit>=1.30.0
 pandas>=2.0.0
 numpy>=1.24.0

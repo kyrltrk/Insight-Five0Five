@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import wbgapi as wb
+import sqlite3
+import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -81,35 +82,91 @@ INDICATOR_DESCRIPTIONS = {
 # 3. EXTRACCIÓN Y LIMPIEZA DE DATOS (DATA PIPELINE)
 # =============================================================================
 @st.cache_data(ttl=86400)
-def load_and_process_data(cache_buster=1):
-    current_year = pd.Timestamp.now().year
-    years = range(current_year - 16, current_year)
-    
-    df = wb.data.DataFrame(list(INDICATORS.keys()), ['NIC'], time=years)
+def _cargar_desde_api():
+    import wbgapi as wb
+
+    anio_actual = pd.Timestamp.now().year
+    anios = range(anio_actual - 16, anio_actual)
+
+    df = wb.data.DataFrame(list(INDICATORS.keys()), ['NIC'], time=anios)
     df = df.reset_index()
-    
+
     if 'economy' not in df.columns:
         df['economy'] = 'NIC'
-        
+
     df_long = df.melt(id_vars=['economy', 'series'], var_name='Year', value_name='Value')
     df_long['Year'] = df_long['Year'].str.replace('YR', '').astype(int)
-    
+
     df_long['Value'] = df_long.groupby(['series'])['Value'].transform(
         lambda x: x.interpolate(method='linear', limit_direction='both')
     )
-    
+
     df_long['Indicator'] = df_long['series'].map(INDICATORS)
-    
-    df_wide = df_long.pivot_table(index=['Year'], columns='Indicator', values='Value').reset_index()
-    
+
+    df_wide = df_long.pivot_table(
+        index=['Year'], columns='Indicator', values='Value'
+    ).reset_index()
+
     return df_long, df_wide
 
-try:
-    with st.spinner('Conectando con el Banco Mundial y procesando datos...'):
-        df_long, df_wide = load_and_process_data(cache_buster=3)
-except Exception as e:
-    st.error(f"Error al conectar con la API: {e}")
-    st.stop()
+
+def _cargar_desde_db():
+    ruta_db = os.environ.get("WORLDBANK_DB", "worldbank.db")
+
+    if not os.path.exists(ruta_db):
+        raise FileNotFoundError(
+            "No hay conexion a internet ni base de datos local."
+        )
+
+    conexion = sqlite3.connect(ruta_db)
+    query = """
+        SELECT v.pais AS economy,
+               v.indicador_codigo AS series,
+               v.anio AS Year,
+               v.valor AS Value,
+               i.nombre AS Indicator
+        FROM valores v
+        JOIN indicadores i ON v.indicador_codigo = i.codigo
+        ORDER BY v.anio
+    """
+    df_long = pd.read_sql_query(query, conexion)
+    conexion.close()
+
+    if df_long.empty:
+        raise ValueError("La base de datos local esta vacia.")
+
+    df_long['Value'] = df_long.groupby(['series'])['Value'].transform(
+        lambda x: x.interpolate(method='linear', limit_direction='both')
+    )
+
+    df_wide = df_long.pivot_table(
+        index=['Year'], columns='Indicator', values='Value'
+    ).reset_index()
+
+    return df_long, df_wide
+
+
+@st.cache_data(ttl=86400)
+def load_and_process_data():
+    try:
+        with st.spinner('Conectando con el Banco Mundial...'):
+            return _cargar_desde_api()
+    except Exception:
+        try:
+            with st.spinner('Sin internet. Cargando datos locales desde SQLite...'):
+                return _cargar_desde_db()
+        except (FileNotFoundError, ValueError):
+            st.error(
+                "No hay conexion a internet ni base de datos local.\n\n"
+                "**Paso requerido:** Ejecute el siguiente comando en la terminal "
+                "para crear la base de datos local:\n\n"
+                "```\npython populate_db.py\n```\n\n"
+                "*(Requiere conexion a internet para descargar los datos del Banco Mundial xd)*"
+            )
+            st.stop()
+
+
+df_long, df_wide = load_and_process_data()
 
 # =============================================================================
 # 4. INTERFAZ DE USUARIO: SIDEBAR
@@ -123,7 +180,7 @@ with st.sidebar:
     selected_indicator = st.selectbox("Indicador Principal:", list(INDICATORS.values()))
     
     st.markdown("---")
-    st.markdown('<div class="icon-text"><span class="material-icons" style="color: #718096; font-size: 18px;">info</span> <span style="color: #718096; font-size: 0.9em;">Fuente: Banco Mundial (API WBGAPI). Datos en caché para mayor velocidad.</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="icon-text"><span class="material-icons" style="color: #718096; font-size: 18px;">info</span> <span style="color: #718096; font-size: 0.9em;">Datos: Banco Mundial vía API o SQLite local si no hay internet.</span></div>', unsafe_allow_html=True)
 
 # =============================================================================
 # 5. PANEL DE INTELIGENCIA: KPIs
@@ -188,7 +245,7 @@ with col_left:
         sns.lineplot(data=plot_data, x='Year', y='Value', marker='o', ax=ax1, color='#1A365D', linewidth=2.5)
         ax1.set_ylabel("Valor")
     else:
-        ax1.text(0.5, 0.5, 'No hay datos disponibles en la API', ha='center', va='center', color='#718096')
+        ax1.text(0.5, 0.5, 'No hay datos disponibles', ha='center', va='center', color='#718096')
         ax1.set_axis_off()
         
     ax1.set_xlabel("Año")
@@ -269,7 +326,7 @@ with col_bottom2:
             ax3.text(0.5, 0.5, 'Datos insuficientes', ha='center', va='center', color='#718096')
             ax3.set_axis_off()
     else:
-        ax3.text(0.5, 0.5, 'Indicadores no disponibles en la API', ha='center', va='center', color='#718096')
+        ax3.text(0.5, 0.5, 'Indicadores no disponibles', ha='center', va='center', color='#718096')
         ax3.set_axis_off()
     
     plt.legend(bbox_to_anchor=(1.01, 1), loc='upper left')
@@ -282,7 +339,7 @@ with col_bottom2:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #718096; font-size: 0.85em;'>"
-    "Desarrollado en Python | <b>Insight Five0Five</b> | Librerías: Streamlit, Pandas, NumPy, Wbgapi, Seaborn | Datos: Banco Mundial (API WBGAPI) | © 2024 | Lerickson Gonzalez - UNHSJM"
+    "Desarrollado en Python | <b>Insight Five0Five</b> | Librerías: Streamlit, Pandas, NumPy, Seaborn | Datos: Banco Mundial (API / SQLite local) | 2026 | Lerickson Gonzalez - UNHSJM"
     "</div>", 
     unsafe_allow_html=True
 )
