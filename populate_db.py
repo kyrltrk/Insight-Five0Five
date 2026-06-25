@@ -3,6 +3,14 @@ import sys
 
 from application.transformer import DataTransformer
 from application.validator import DataValidator
+from config.settings import (
+    ANIOS_HISTORIA,
+    DB_NAME,
+    INDICATORS,
+    PAIS,
+    RANGOS_VALIDOS,
+    SCHEMA_FILE,
+)
 from domain.exceptions import DomainError
 from domain.use_cases import PopulateDatabaseUseCase
 from infrastructure.api.worldbank import WorldBankSource
@@ -18,10 +26,25 @@ logger = logging.getLogger("populate_db")
 
 def main() -> None:
     source = WorldBankSource()
-    repo = SQLiteRepository()
+    # SRP & LSP: SQLiteRepository se inicializa con la ruta del archivo de base de datos
+    repo = SQLiteRepository(DB_NAME)
     transformer = DataTransformer()
     validator = DataValidator()
-    use_case = PopulateDatabaseUseCase(source, repo, transformer, validator)
+    
+    # OCP & DIP: Componemos el caso de uso inyectando todas las dependencias concretas
+    # y los parámetros de configuración correspondientes.
+    use_case = PopulateDatabaseUseCase(
+        source=source,
+        repo=repo,
+        transformer=transformer,
+        validator=validator,
+        indicators=INDICATORS,
+        country=PAIS,
+        db_name=DB_NAME,
+        schema_file=SCHEMA_FILE,
+        anios_historia=ANIOS_HISTORIA,
+        rangos_validos=RANGOS_VALIDOS,
+    )
 
     try:
         use_case.execute()
@@ -35,3 +58,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

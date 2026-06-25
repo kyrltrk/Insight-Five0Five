@@ -11,14 +11,14 @@ El propósito de este proyecto es demostrar la aplicación práctica de herramie
 ### Conceptos Aplicados en el Código:
 
 1. **Modo Híbrido API / SQLite:** Con internet, la app consulta el Banco Mundial vía `wbgapi`. Sin internet, lee desde una base de datos SQLite local, garantizando su funcionamiento offline.
-2. **Pipeline ETL Modular:** El script `populate_db.py` separa responsabilidades en capas: conexión, esquema, catálogo, descarga API, transformación, validación e inserción.
-3. **Validación de Datos (Calidad):** Verifica rangos válidos por indicador (porcentajes 0-100, esperanza de vida 20-100, inflación en rangos razonables) y convierte valores fuera de rango a NULL con advertencias.
-4. **Logging Estructurado:** Reemplaza `print()` por logging con niveles INFO, WARNING y ERROR para mejor depuración en producción.
-5. **Manejo de Errores Específico:** Captura excepciones por tipo (`FileNotFoundError`, `ValueError`, `RuntimeError`, `sqlite3.Error`, `ImportError`) en lugar de un `except Exception` genérico.
-6. **Configuración por Variables de Entorno:** `WORLDBANK_DB`, `WORLDBANK_SCHEMA`, `WORLDBANK_PAIS`, `WORLDBANK_ANIOS` permiten personalizar sin modificar código.
-7. **Procesamiento de Datos (Pandas):** Transformación de DataFrames de formato ancho a largo (`melt`), interpolación lineal de valores nulos y pivote a formato ancho para visualización.
-8. **Análisis Estadístico (NumPy):** Implementación de algoritmos matemáticos para calcular deltas interanuales y un motor simple de detección de anomalías (identificación de outliers históricos que superan las 2 desviaciones estándar de la media de crecimiento).
-9. **Optimización de Recursos:** Uso de memoria caché en el servidor (`@st.cache_data`) para minimizar peticiones HTTP redundantes a la API, ahorrando ancho de banda y garantizando un tiempo de carga algorítmico de O(1) en los re-renders.
+2. **Arquitectura Hexagonal y Limpia:** Estructuración robusta dividida en dominio, aplicación e infraestructura, haciendo al software altamente desacoplado.
+3. **Principios S.O.L.I.D.:** Diseño guiado por los cinco principios SOLID para asegurar mantenibilidad, extensibilidad y facilidad de pruebas (detallado abajo).
+4. **Pipeline ETL Modular:** El script `populate_db.py` separa responsabilidades en capas: conexión, esquema, catálogo, descarga API, transformación, validación e inserción.
+5. **Validación de Datos (Calidad):** Verifica rangos válidos por indicador (porcentajes 0-100, esperanza de vida 20-100, inflación en rangos razonables) y convierte valores fuera de rango a NULL con advertencias.
+6. **Logging Estructurado:** Reemplaza `print()` por logging con niveles INFO, WARNING y ERROR para mejor depuración en producción.
+7. **Mapeo de Errores e Invariantes:** Mapea excepciones de bajo nivel de persistencia a excepciones semánticas de dominio, respetando los límites de capas.
+8. **Procesamiento de Datos (Pandas):** Transformación de DataFrames de formato ancho a largo (`melt`), interpolación lineal de valores nulos y pivote a formato ancho para visualización.
+9. **Análisis Estadístico Aislado (SRP):** Cálculo matemático de outliers históricos que superan las 2 desviaciones estándar encapsulado en un servicio especializado en la capa de aplicación.
 
 ## Requisitos Técnicos y Entorno Virtual
 
@@ -77,6 +77,7 @@ Insight Five0Five/
 │   └── use_cases.py               # Casos de uso (GetIndicators, PopulateDatabase)
 │
 ├── application/                   # CAPA DE APLICACIÓN (servicios)
+│   ├── anomaly_detector.py        # Detector de anomalías matemáticas (NumPy) (SRP)
 │   ├── transformer.py             # Transformaciones (melt, interpolate, pivot)
 │   └── validator.py               # Validación de rangos
 │
@@ -149,19 +150,3 @@ Insight Five0Five/
 3. **infrastructure/ — Capa de Infraestructura:** Adaptadores concretos que implementan los puertos del dominio. `WorldBankSource` traduce llamadas a la API del Banco Mundial, `SQLiteRepository` maneja la persistencia, y `StreamlitUI` renderiza el dashboard.
 
 4. **config/ — Configuración:** Constantes centralizadas como indicadores, rangos de validación y variables de entorno.
-
-### Principios de Diseño Aplicados
-
-1. **Dominio puro:** Las entidades (`domain/entities.py`) son dataclasses sin imports de infraestructura. Los casos de uso (`domain/use_cases.py`) orquestan la lógica sin conocer detalles técnicos.
-2. **Puertos e interfaces:** Los adaptadores implementan contratos abstractos (`domain/ports.py`), permitiendo intercambiar tecnologías sin modificar el núcleo.
-3. **Inversión de dependencias:** Los Composition Roots (`app.py`, `populate_db.py`) son el único lugar donde se crean instancias concretas y se inyectan dependencias.
-4. **Fallback automático:** El caso de uso `GetIndicatorsUseCase` intenta la API del Banco Mundial primero; si falla, lee desde SQLite local. El usuario nunca ve el cambio de origen.
-5. **Excepciones de dominio:** Errores como `ApiCaidaError` o `DatosNoEncontradosError` encapsulan problemas técnicos en términos del negocio.
-
-## Posibles Mejoras a Futuro (Roadmap Estudiantil)
-
-- [ ] Integrar algoritmos de *Machine Learning* (ej. Regresión Lineal con `scikit-learn`) para realizar análisis predictivo del próximo año fiscal.
-- [ ] Implementar un botón dinámico (`st.download_button`) para que los usuarios puedan descargar el DataFrame ya procesado y limpio en formato CSV.
-- [ ] Agregar batería de pruebas unitarias y de integración para el pipeline ETL y la capa de visualización.
-
----

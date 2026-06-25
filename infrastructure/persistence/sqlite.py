@@ -4,15 +4,26 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from domain.exceptions import EsquemaNoEncontradoError
+# ==============================================================================
+# PRINCIPIOS SOLID: ISP, SRP y LSP
+# ==============================================================================
+# 1. ISP: Implementa IndicatorRepository (que hereda de IndicatorReader e IndicatorWriter).
+# 2. SRP: Centraliza la ruta de la base de datos a través de la propiedad de instancia
+#    self._db_path para evitar inconsistencias en load_data.
+# 3. LSP: Captura errores internos de infraestructura (sqlite3.Error, FileNotFoundError)
+#    y los traduce a excepciones semánticas de dominio (DatosNoEncontradosError).
+# ==============================================================================
+from domain.exceptions import DatosNoEncontradosError, EsquemaNoEncontradoError
 from domain.ports import IndicatorRepository
 
 
 class SQLiteRepository(IndicatorRepository):
-    def __init__(self):
+    def __init__(self, db_path: str = "worldbank.db"):
+        self._db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
 
     def connect(self, db_path: str) -> None:
+        self._db_path = db_path
         self._conn = sqlite3.connect(db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
 
@@ -47,14 +58,13 @@ class SQLiteRepository(IndicatorRepository):
         return len(records)
 
     def load_data(self) -> pd.DataFrame:
-        ruta_db = os.environ.get("WORLDBANK_DB", "worldbank.db")
-
-        if not os.path.exists(ruta_db):
-            raise FileNotFoundError(
-                "No hay conexion a internet ni base de datos local."
+        # LSP: El cliente espera DatosNoEncontradosError, no FileNotFoundError ni sqlite3.Error.
+        # Validamos la existencia del archivo de base de datos antes de realizar la consulta.
+        if not os.path.exists(self._db_path):
+            raise DatosNoEncontradosError(
+                f"No hay conexion a internet ni base de datos local en '{self._db_path}'."
             )
 
-        conn = sqlite3.connect(ruta_db)
         query = """
             SELECT v.pais AS economy,
                    v.indicador_codigo AS series,
@@ -65,11 +75,24 @@ class SQLiteRepository(IndicatorRepository):
             JOIN indicadores i ON v.indicador_codigo = i.codigo
             ORDER BY v.anio
         """
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        
+        try:
+            # SRP: Usar la conexión activa si existe; de lo contrario, abrir y cerrar una temporal.
+            if self._conn is not None:
+                df = pd.read_sql_query(query, self._conn)
+            else:
+                conn = sqlite3.connect(self._db_path)
+                try:
+                    df = pd.read_sql_query(query, conn)
+                finally:
+                    conn.close()
+        except sqlite3.Error as e:
+            raise DatosNoEncontradosError(
+                f"Error al realizar consulta SQL en base de datos local: {e}"
+            )
 
         if df.empty:
-            raise ValueError("La base de datos local esta vacia.")
+            raise DatosNoEncontradosError("La base de datos local esta vacia.")
 
         return df
 
@@ -81,3 +104,4 @@ class SQLiteRepository(IndicatorRepository):
         if self._conn:
             self._conn.close()
             self._conn = None
+

@@ -3,8 +3,16 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+# ==============================================================================
+# PRINCIPIO DE INVERSIÓN DE DEPENDENCIAS (DIP)
+# ==============================================================================
+# DataTransformer ahora implementa de forma explícita el puerto DataTransformerPort
+# definido en el Dominio, de modo que el dominio interactúa solo con la abstracción.
+# ==============================================================================
+from domain.ports import DataTransformerPort
 
-class DataTransformer:
+
+class DataTransformer(DataTransformerPort):
     def process_api_data(
         self, raw_df: pd.DataFrame, indicator_map: Dict[str, str]
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:

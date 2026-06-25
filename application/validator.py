@@ -3,10 +3,18 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
+# ==============================================================================
+# PRINCIPIO DE INVERSIÓN DE DEPENDENCIAS (DIP)
+# ==============================================================================
+# DataValidator ahora implementa de forma explícita el puerto DataValidatorPort
+# definido en el Dominio, de modo que el dominio interactúa solo con la abstracción.
+# ==============================================================================
+from domain.ports import DataValidatorPort
+
 logger = logging.getLogger("populate_db")
 
 
-class DataValidator:
+class DataValidator(DataValidatorPort):
     def validate(
         self,
         df_long: pd.DataFrame,

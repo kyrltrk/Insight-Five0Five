@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from application.anomaly_detector import NumPyAnomalyDetector
 from application.transformer import DataTransformer
 from application.validator import DataValidator
 from domain.exceptions import ApiCaidaError, DatosNoEncontradosError
@@ -54,10 +55,21 @@ def _make_fake_db_data():
 
 
 class TestGetIndicatorsUseCase:
+    # SOLID: Los tests inyectan explícitamente los diccionarios de indicadores y el país
+    # en el constructor de GetIndicatorsUseCase, respetando OCP.
     def test_fetches_from_api_when_available(self, transformer):
         source = FakeSource(data=_make_fake_api_data())
         repo = FakeRepository()
-        use_case = GetIndicatorsUseCase(source, repo, transformer)
+        use_case = GetIndicatorsUseCase(
+            api_source=source,
+            db_repo=repo,
+            transformer=transformer,
+            indicators={
+                "IT.NET.USER.ZS": "Uso de Internet (%)",
+                "EG.ELC.ACCS.ZS": "Acceso a Electricidad (%)",
+            },
+            country="NIC",
+        )
 
         df_long, df_wide = use_case.execute()
 
@@ -69,7 +81,16 @@ class TestGetIndicatorsUseCase:
     def test_falls_back_to_db_when_api_fails(self, transformer):
         source = FakeSource(should_fail=True)
         repo = FakeRepository(data=_make_fake_db_data())
-        use_case = GetIndicatorsUseCase(source, repo, transformer)
+        use_case = GetIndicatorsUseCase(
+            api_source=source,
+            db_repo=repo,
+            transformer=transformer,
+            indicators={
+                "IT.NET.USER.ZS": "Uso de Internet (%)",
+                "EG.ELC.ACCS.ZS": "Acceso a Electricidad (%)",
+            },
+            country="NIC",
+        )
 
         df_long, df_wide = use_case.execute()
 
@@ -80,17 +101,45 @@ class TestGetIndicatorsUseCase:
     def test_raises_error_when_both_sources_fail(self, transformer):
         source = FakeSource(should_fail=True)
         repo = FakeRepository()
-        use_case = GetIndicatorsUseCase(source, repo, transformer)
+        use_case = GetIndicatorsUseCase(
+            api_source=source,
+            db_repo=repo,
+            transformer=transformer,
+            indicators={
+                "IT.NET.USER.ZS": "Uso de Internet (%)",
+                "EG.ELC.ACCS.ZS": "Acceso a Electricidad (%)",
+            },
+            country="NIC",
+        )
 
         with pytest.raises(DatosNoEncontradosError):
             use_case.execute()
 
 
 class TestPopulateDatabaseUseCase:
+    # SOLID: Los tests inyectan explícitamente dependencias y parámetros de configuración
+    # en el constructor de PopulateDatabaseUseCase, respetando OCP.
     def test_executes_full_etl_pipeline(self, transformer, validator):
         source = FakeSource(data=_make_fake_api_data())
         repo = FakeRepository()
-        use_case = PopulateDatabaseUseCase(source, repo, transformer, validator)
+        use_case = PopulateDatabaseUseCase(
+            source=source,
+            repo=repo,
+            transformer=transformer,
+            validator=validator,
+            indicators={
+                "IT.NET.USER.ZS": "Uso de Internet (%)",
+                "EG.ELC.ACCS.ZS": "Acceso a Electricidad (%)",
+            },
+            country="NIC",
+            db_name="test.db",
+            schema_file="schema.sql",
+            anios_historia=15,
+            rangos_validos={
+                "IT.NET.USER.ZS": (0, 100),
+                "EG.ELC.ACCS.ZS": (0, 100),
+            },
+        )
 
         use_case.execute()
 
@@ -102,7 +151,24 @@ class TestPopulateDatabaseUseCase:
     def test_rolls_back_on_failure(self, transformer, validator):
         source = FakeSource(should_fail=True)
         repo = FakeRepository()
-        use_case = PopulateDatabaseUseCase(source, repo, transformer, validator)
+        use_case = PopulateDatabaseUseCase(
+            source=source,
+            repo=repo,
+            transformer=transformer,
+            validator=validator,
+            indicators={
+                "IT.NET.USER.ZS": "Uso de Internet (%)",
+                "EG.ELC.ACCS.ZS": "Acceso a Electricidad (%)",
+            },
+            country="NIC",
+            db_name="test.db",
+            schema_file="schema.sql",
+            anios_historia=15,
+            rangos_validos={
+                "IT.NET.USER.ZS": (0, 100),
+                "EG.ELC.ACCS.ZS": (0, 100),
+            },
+        )
 
         with pytest.raises(ApiCaidaError):
             use_case.execute()
@@ -167,3 +233,21 @@ class TestDataValidator:
 
         assert result.loc[0, "Value"] == 50.0
         assert pd.isna(result.loc[1, "Value"])
+
+
+class TestNumPyAnomalyDetector:
+    # SOLID: Test para el nuevo detector de anomalías extraído de la UI (SRP).
+    def test_detects_outliers_correctly(self):
+        detector = NumPyAnomalyDetector()
+        years = [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019]
+        # Variación progresiva suave excepto un cambio enorme en 2017
+        values = [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 80.0, 81.0, 82.0]
+        
+        anomalies = detector.detect_anomalies(years, values)
+        
+        # Debe haber detectado una variación abrupta en el año 2017 (de 16.0 a 80.0)
+        assert len(anomalies) == 1
+        assert anomalies[0][0] == 2017
+        assert anomalies[0][1] == 64.0  # 80.0 - 16.0
+
+
